@@ -55,7 +55,7 @@ def init_db():
     cursor = conn.cursor()
     
     # ============================================================================
-    # USERS TABLE (Existing)
+    # USERS TABLE 
     # ============================================================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -77,7 +77,7 @@ def init_db():
     ''')
     
     # ============================================================================
-    # ACTIVITY LOGS TABLE (Existing)
+    # ACTIVITY LOGS TABLE 
     # ============================================================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS activity_logs (
@@ -92,8 +92,7 @@ def init_db():
     ''')
     
     # ============================================================================
-    # TRANSACTIONS TABLE (NEW)
-    # Store all transaction data
+    # TRANSACTIONS TABLE 
     # ============================================================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS transactions (
@@ -120,8 +119,7 @@ def init_db():
     ''')
     
     # ============================================================================
-    # PREDICTIONS TABLE (NEW)
-    # Store prediction results linked to transactions
+    # PREDICTIONS TABLE 
     # ============================================================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS predictions (
@@ -146,8 +144,7 @@ def init_db():
     ''')
     
     # ============================================================================
-    # RULE VIOLATIONS TABLE (NEW)
-    # Store individual rule violations for analysis
+    # RULE VIOLATIONS TABLE 
     # ============================================================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS rule_violations (
@@ -162,8 +159,7 @@ def init_db():
     ''')
     
     # ============================================================================
-    # SECOND VERIFICATIONS TABLE (NEW)
-    # Store manual analyst reviews
+    # SECOND VERIFICATIONS TABLE 
     # ============================================================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS second_verifications (
@@ -181,8 +177,7 @@ def init_db():
     ''')
     
     # ============================================================================
-    # BATCH JOBS TABLE (NEW)
-    # Track batch processing jobs
+    # BATCH JOBS TABLE 
     # ============================================================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS batch_jobs (
@@ -203,8 +198,7 @@ def init_db():
     ''')
     
     # ============================================================================
-    # VELOCITY TRACKING TABLE (NEW)
-    # Track card velocity for rule-based detection
+    # VELOCITY TRACKING TABLE 
     # ============================================================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS velocity_events (
@@ -218,8 +212,7 @@ def init_db():
     ''')
     
     # ============================================================================
-    # SHAP VALUES TABLE (NEW) - Optional for ML explainability
-    # Store SHAP feature importance values
+    # SHAP VALUES TABLE 
     # ============================================================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS shap_values (
@@ -233,8 +226,7 @@ def init_db():
     ''')
     
     # ============================================================================
-    # ANALYTICS SNAPSHOTS TABLE (NEW)
-    # Periodic snapshots of system analytics for trending
+    # ANALYTICS SNAPSHOTS TABLE 
     # ============================================================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS analytics_snapshots (
@@ -904,15 +896,6 @@ class FraudDetectionEngine:
             score += 1
             violations.append(f"High Value / Low Pop (${transaction.amt:.2f} in pop {transaction.city_pop})")
         
-        if transaction.card_number:
-            recent_txns = self.velocity_tracker[transaction.card_number]
-            now = datetime.now()
-            recent_count = sum(1 for ts in recent_txns if (now - ts).seconds < 3600)
-            
-            if recent_count >= 4:
-                score += 1
-                violations.append(f"Velocity Spike ({recent_count} tx in 1h)")
-        
         return score, violations
     
     def preprocess_transaction(self, transaction: Transaction) -> pd.DataFrame:
@@ -1025,14 +1008,13 @@ class FraudDetectionEngine:
         # 1. If models aren't loaded, use smart mock immediately
         if self.models is None:
             mock_preds = self._mock_predict(transaction)
-            # Use empty dict for SHAP since we removed it from simulator
             return mock_preds, self.get_ml_explanations(), {}
         
         try:
             X = self.preprocess_transaction(transaction)
             predictions = {}
             
-            # 2. Try predicting with real models
+            # 2. predicting with real models
             for name, model in self.models.items():
                 if model is not None:
                     try:
@@ -1041,7 +1023,7 @@ class FraudDetectionEngine:
                     except:
                         predictions[name] = self._mock_predict(transaction)['XGBoost']
             
-            # 3. DNN Prediction with SATURATION PROTECTION
+            # 3. DNN Prediction
             if self.dnn_model is not None:
                 try:
                     dnn_proba = self.dnn_model(X, training=False).numpy()[0, 0]
@@ -1052,20 +1034,13 @@ class FraudDetectionEngine:
                 # If model missing, fallback
                 predictions['DNN'] = predictions.get('XGBoost', 0.5)
 
-            # --- FIX: DNN SANITY CHECK ---
-            # If DNN is exactly 0.0 or 1.0, it's likely a math error (saturation) due to unscaled inputs.
-            # Or if DNN disagrees with XGBoost by > 50%, it's likely broken.
             xg_score = predictions.get('XGBoost', 0.5)
             dnn_score = predictions.get('DNN', 0.5)
 
-            # Check for broken 0% or huge disagreement
             if dnn_score < 0.001 or abs(xg_score - dnn_score) > 0.5:
-                # Force DNN to follow the ensemble trend + small noise
                 predictions['DNN'] = min(0.99, max(0.01, xg_score + np.random.uniform(-0.05, 0.05)))
-            # -----------------------------
 
-            # 4. SHAP (We keep the calculation in case you use it in Dashboard later, 
-            # but frontend won't show it in Simulator)
+            # 4. SHAP 
             xgboost_score = predictions.get('XGBoost', 0.5)
             shap_dict = {} 
             if self.explainer:
@@ -1220,8 +1195,8 @@ class FraudDetectionEngine:
         # Update decision
         if decision == "Approve":
             final_decision = "Approved"
-            # Don't count as fraud
-        else:  # Reject
+
+        else: 
             final_decision = "Rejected"
             self.fraud_detected += 1
             self.prevented_loss += review_data['transaction'].amt
@@ -1399,11 +1374,11 @@ async def create_user_admin(user: AdminUserCreate, current_user: dict = Depends(
     """Create user (Admin only) - with full details"""
     check_permission(current_user, 'manage_users')
     
-    # Validate role (only admin or analyst allowed)
+    # Validate role 
     if user.role not in ['admin', 'analyst']:
         raise HTTPException(status_code=400, detail="Invalid role. Must be 'admin' or 'analyst'")
     
-    # Create simplified user object for the create_user function
+    # Create simplified user object
     simple_user = UserCreate(username=user.username, password=user.password)
     
     user_id = create_user(
@@ -1456,6 +1431,7 @@ async def update_user(user_id: int, user_update: UserUpdate, current_user: dict 
             updates.append("phone = ?")
             values.append(user_update.phone)
         if user_update.role:
+
             # Validate role
             if user_update.role not in ['admin', 'analyst']:
                 raise HTTPException(status_code=400, detail="Invalid role")
@@ -1487,7 +1463,6 @@ async def delete_user(user_id: int, current_user: dict = Depends(get_current_use
     
     with get_db() as conn:
         cursor = conn.cursor()
-        # Soft delete by deactivating
         cursor.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user_id,))
         conn.commit()
         
@@ -1518,7 +1493,7 @@ async def get_roles():
     return ROLES
 
 # ============================================================================
-# API ENDPOINTS - FRAUD DETECTION (Protected)
+# API ENDPOINTS - FRAUD DETECTION 
 # ============================================================================
 
 @app.get("/")
@@ -1725,7 +1700,7 @@ if __name__ == "__main__":
     )
 
 # ============================================================================
-# NEW API ENDPOINTS - Database Queries
+#  Database Queries
 # ============================================================================
 
 @app.get("/transactions/history")
@@ -1834,7 +1809,7 @@ async def get_database_stats(current_user: dict = Depends(get_current_user)):
         
         # Database file size
         import os
-        db_size = os.path.getsize('fraudguard.db') / (1024 * 1024)  # MB
+        db_size = os.path.getsize('fraudguard.db') / (1024 * 1024)  
         stats['database_size_mb'] = round(db_size, 2)
         
         return stats
