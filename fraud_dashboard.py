@@ -14,16 +14,14 @@ import time
 from typing import Dict, List
 
 # ============================================================================
-# PAGE: LOGIN/SIGNUP (ENTERPRISE VERSION)
+# PAGE: LOGIN/SIGNUP 
 # ============================================================================
 
 def show_login_page():
     """Enterprise login/signup page with simplified UI"""
     
-    # Hero section layout
     col_hero1, col_hero2 = st.columns([3, 2])
     
-    # --- LEFT SIDE: CLEANER & FIXED RENDERING ---
     with col_hero1:
         st.markdown("""
         <div style='padding: 60px 20px;'>
@@ -39,13 +37,12 @@ def show_login_page():
         </div>
         """, unsafe_allow_html=True)
     
-    # --- RIGHT SIDE: SIMPLIFIED FORMS ---
     with col_hero2:
         st.markdown('<div style="padding: 40px 20px;">', unsafe_allow_html=True)
         
         tab1, tab2 = st.tabs(["🔐 Sign In", "📝 Create Account"])
         
-        # --- TAB 1: LOGIN (Unchanged) ---
+        # --- TAB 1: LOGIN  ---
         with tab1:
             st.markdown("### Welcome Back")
             with st.form("login_form"):
@@ -62,14 +59,17 @@ def show_login_page():
                                 "username": username,
                                 "password": password
                             })
-                            if response:
+                            
+                            if response:  # SUCCESS
                                 st.session_state.authenticated = True
                                 st.session_state.token = response['access_token']
                                 st.session_state.user = response['user']
                                 st.session_state.page = 'Dashboard'
-                                st.success(f"✅ Welcome back!")
+                                st.success(f"✅ Welcome back, {response['user']['full_name']}!")
                                 time.sleep(1)
                                 st.rerun()
+                            else: # FAILURE
+                                st.error("❌ Invalid username or password. Please try again.")
 
         # --- TAB 2: SIMPLIFIED SIGNUP ---
         with tab2:
@@ -77,33 +77,52 @@ def show_login_page():
             st.caption("Quick registration")
             
             with st.form("signup_form"):
-                # Simplified Fields
                 username = st.text_input("Username *", placeholder="Choose a username")
                 new_password = st.text_input("Password *", type="password", placeholder="Min. 6 characters")
                 confirm_password = st.text_input("Confirm Password *", type="password")
                 
                 st.info("ℹ️ **Account Type:** Fraud Analyst\n\nYou'll have access to fraud detection, monitoring, and transaction verification features.")
-                account_type = "Analyst"
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 submit_signup = st.form_submit_button("Create Account", use_container_width=True, type="primary")
                 
                 if submit_signup:
-                    # Simplified Validation
-                    if not all([username, new_password, confirm_password]):
-                        st.error("⚠️ Please fill in all fields")
-                    elif new_password != confirm_password:
-                        st.error("⚠️ Passwords do not match")
-                    elif len(new_password) < 6:
-                        st.error("⚠️ Password must be at least 6 characters")
+                    def validate_signup():
+                        """Returns (is_valid, error_message)"""
+                        
+                        if not all([username, new_password, confirm_password]):
+                            return False, "⚠️ Please fill in all fields"
+                        
+                        if new_password != confirm_password:
+                            return False, "⚠️ Passwords do not match"
+                        
+                        if len(new_password) < 6:
+                            return False, "⚠️ Password must be at least 6 characters"
+                        
+                        if len(new_password) > 72:
+                            return False, "⚠️ Password must be less than 72 characters"
+                        
+                        if len(username) < 3:
+                            return False, "⚠️ Username must be at least 3 characters"
+                        
+                        if len(username) > 50:
+                            return False, "⚠️ Username must be less than 50 characters"
+                        
+                        if not username.replace('_', '').isalnum():
+                            return False, "⚠️ Username can only contain letters, numbers, and underscores"
+                        
+                        return True, None
+                    
+                    is_valid, error_msg = validate_signup()
+                    
+                    if not is_valid:
+                        st.error(error_msg)
                     else:
                         with st.spinner("Creating account..."):
-                            # API Call with minimal data
-                            # Backend handles missing email/full_name automatically
                             response = call_api("/auth/signup", method="POST", data={
                                 "username": username,
                                 "password": new_password,
-                                "role": "analyst"  
+                                "role": "analyst"
                             })
                             
                             if response:
@@ -114,6 +133,8 @@ def show_login_page():
                                 st.success(f"✅ Account created! Welcome, {username}!")
                                 time.sleep(1)
                                 st.rerun()
+                            else:
+                                st.error("❌ Failed to create account. Username may already be taken.")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -298,12 +319,10 @@ def call_api(endpoint: str, method: str = "GET", data: Dict = None, files=None):
     try:
         url = f"{API_BASE_URL}{endpoint}"
         
-        # Add authentication header if token exists
         headers = {}
         if st.session_state.get('token') and not endpoint.startswith('/auth/'):
             headers['Authorization'] = f"Bearer {st.session_state.token}"
         
-        # --- UPDATE START: ADD PUT AND DELETE SUPPORT ---
         if method == "GET":
             response = requests.get(url, params=data, headers=headers, timeout=10)
         elif method == "POST":
@@ -318,16 +337,49 @@ def call_api(endpoint: str, method: str = "GET", data: Dict = None, files=None):
         
         # Handle 401 Unauthorized
         if response.status_code == 401:
-            st.session_state.authenticated = False
-            st.session_state.token = None
-            st.session_state.user = None
-            st.error("Session expired. Please login again.")
-            st.rerun()
+            if not endpoint.startswith('/auth/'):
+                st.session_state.authenticated = False
+                st.session_state.token = None
+                st.session_state.user = None
+                st.error("Session expired. Please login again.")
+                st.rerun()
+            return None
+        
+        # Handle 400 Bad Request (validation errors)
+        if response.status_code == 400:
+            try:
+                error_data = response.json()
+                
+                if 'detail' in error_data:
+                    if isinstance(error_data['detail'], str):
+                        st.error(f"⚠️ {error_data['detail']}")
+                    elif isinstance(error_data['detail'], list):
+                        for error in error_data['detail']:
+                            field = error.get('loc', ['unknown'])[-1]
+                            msg = error.get('msg', 'Invalid value')
+                            st.error(f"⚠️ {field}: {msg}")
+                    elif isinstance(error_data['detail'], dict):
+                        st.error(f"⚠️ {error_data['detail'].get('error', 'Validation error')}")
+                else:
+                    st.error("⚠️ Invalid input. Please check your data.")
+            except:
+                st.error("⚠️ Validation error. Please check your input.")
+            
+            return None
+        
+        # Handle 403 Forbidden
+        if response.status_code == 403:
             return None
         
         response.raise_for_status()
         return response.json()
     
+    except requests.exceptions.HTTPError as e:
+        if endpoint.startswith('/auth/'):
+            return None
+        else:
+            st.error(f"❌ API Error: {str(e)}")
+            return None
     except requests.exceptions.ConnectionError:
         st.error("🔴 Cannot connect to API. Please ensure the backend is running on port 8000.")
         st.code("python fraud_detection_api.py", language="bash")
@@ -336,8 +388,11 @@ def call_api(endpoint: str, method: str = "GET", data: Dict = None, files=None):
         st.error("⏱️ API request timed out. Please try again.")
         return None
     except Exception as e:
-        st.error(f"❌ API Error: {str(e)}")
-        return None
+        if endpoint.startswith('/auth/'):
+            return None
+        else:
+            st.error(f"❌ API Error: {str(e)}")
+            return None
 
 
 def get_analytics():
@@ -680,8 +735,6 @@ if st.session_state.page == 'Dashboard':
         col_ai1, col_ai2 = st.columns([2, 1])
         
         with col_ai1:
-            # We mock the GLOBAL importance based on domain knowledge for the dashboard view
-            # (Calculating this dynamically for all history is too slow for a dashboard)
             feature_importance = {
                 'Transaction Amount': 0.35,
                 'Hour of Day (Late Night)': 0.25,
@@ -744,13 +797,10 @@ elif st.session_state.page == 'Admin Dashboard':
     
     st.markdown('<h1 style="color: #ffffff; font-size: 32px; font-weight: 700;">👥 User Management</h1>', unsafe_allow_html=True)
     st.markdown('<p style="color: #a0a5ba; font-size: 14px; margin-top: 5px;">Manage users, roles, and permissions</p>', unsafe_allow_html=True)
-    
-    # Tabs for different admin functions
+
     tab1, tab2, tab3, tab4 = st.tabs(["👤 Users", "➕ Add User", "📊 Activity Logs", "🔑 Roles & Permissions"])
     
-    # ====================
-    # TAB 1: USER LIST
-    # ====================
+    # USER LIST
     with tab1:
         st.markdown("### Registered Users")
         
@@ -807,7 +857,9 @@ elif st.session_state.page == 'Admin Dashboard':
             
             # Users table
             for user in filtered_users:
-                with st.expander(f"👤 {user['full_name']} ({user['username']})", expanded=False):
+                is_editing = st.session_state.get(f"editing_{user['id']}", False)
+                
+                with st.expander(f"👤 {user['full_name']} ({user['username']})", expanded=is_editing):
                     col_a, col_b, col_c = st.columns(3)
                     
                     with col_a:
@@ -821,15 +873,15 @@ elif st.session_state.page == 'Admin Dashboard':
                         st.markdown("**Organization Details**")
                         st.markdown(f"**Organization:** {user.get('organization', 'N/A')}")
                         st.markdown(f"**Department:** {user.get('department', 'N/A')}")
-                        
-                        # Role badge
-                        role = user.get('role', 'unknown')
-                        role_color = {
-                            'admin': '#ff8800',
-                            'analyst': '#00ff88'
-                        }.get(role, '#cccccc')
-                        
-                        st.markdown(f"**Role:** <span style='background-color: {role_color}33; color: {role_color}; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>{role.replace('_', ' ').title()}</span>", unsafe_allow_html=True)
+
+                        if not is_editing:
+                            role = user.get('role', 'unknown')
+                            role_color = {
+                                'admin': '#ff8800',
+                                'analyst': '#00ff88'
+                            }.get(role, '#cccccc')
+                            
+                            st.markdown(f"**Role:** <span style='background-color: {role_color}33; color: {role_color}; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>{role.replace('_', ' ').title()}</span>", unsafe_allow_html=True)
                     
                     with col_c:
                         st.markdown("**Account Status**")
@@ -843,56 +895,101 @@ elif st.session_state.page == 'Admin Dashboard':
                     
                     st.markdown("---")
                     
-                    # Action buttons
-                    col_act1, col_act2, col_act3, col_act4 = st.columns(4)
-                    
-                    # Prevent self-modification
-                    is_self = user['id'] == st.session_state.user['id']
-                    can_modify = user_role == 'super_admin' or (user_role == 'admin' and user.get('role') not in ['admin', 'super_admin'])
-                    
-                    with col_act1:
-                        if st.button("✏️ Edit", key=f"edit_{user['id']}", disabled=not can_modify):
-                            st.session_state.editing_user = user
-                            st.rerun()
-                    
-                    with col_act2:
-                        if user.get('is_active'):
-                            if st.button("🚫 Deactivate", key=f"deact_{user['id']}", disabled=is_self or not can_modify):
-                                # CHANGE "POST" TO "PUT" HERE
+                    # EDIT MODE
+                    if is_editing:
+                        st.markdown("### ✏️ Edit User")
+                        
+                        with st.form(f"edit_form_{user['id']}"):
+                            # Role selection
+                            current_role = user.get('role', 'analyst')
+                            new_role = st.selectbox(
+                                "Change Role",
+                                options=['analyst', 'admin'],
+                                index=0 if current_role == 'analyst' else 1,
+                                format_func=lambda x: '🔧 Administrator' if x == 'admin' else '🔎 Fraud Analyst'
+                            )
+                            
+                            # Show warning if promoting to admin
+                            if new_role == 'admin' and current_role != 'admin':
+                                st.warning("⚠️ **Promoting to Admin will grant full system access**, including:\n- User management\n- Role modifications\n- System configuration\n- All analyst permissions")
+                            
+                            # Show warning if demoting from admin
+                            if new_role == 'analyst' and current_role == 'admin':
+                                st.warning("⚠️ **Demoting to Analyst will remove admin privileges**")
+                            
+                            col_save, col_cancel = st.columns(2)
+                            
+                            with col_save:
+                                submit_edit = st.form_submit_button("💾 Save Changes", use_container_width=True, type="primary")
+                            
+                            with col_cancel:
+                                cancel_edit = st.form_submit_button("❌ Cancel", use_container_width=True)
+                            
+                            if submit_edit:
+                                # Update user role
                                 response = call_api(f"/admin/users/{user['id']}", method="PUT", data={
-                                    "is_active": False
+                                    "role": new_role
                                 })
+                                
                                 if response:
-                                    st.success(f"User {user['username']} deactivated")
+                                    st.success(f"✅ User {user['username']} updated successfully!")
+                                    st.session_state[f"editing_{user['id']}"] = False
                                     time.sleep(1)
                                     st.rerun()
-                        else:
-                            if st.button("✅ Activate", key=f"act_{user['id']}", disabled=not can_modify):
-                                # CHANGE "POST" TO "PUT" HERE
-                                response = call_api(f"/admin/users/{user['id']}", method="PUT", data={
-                                    "is_active": True
-                                })
-                                if response:
-                                    st.success(f"User {user['username']} activated")
-                                    time.sleep(1)
-                                    st.rerun()
+                            
+                            if cancel_edit:
+                                st.session_state[f"editing_{user['id']}"] = False
+                                st.rerun()
                     
-                    with col_act3:
-                        if st.button("🔄 Reset Password", key=f"reset_{user['id']}", disabled=not can_modify):
-                            st.info("Password reset functionality - Send reset email")
-                    
-                    with col_act4:
-                        if user_role == 'super_admin':
-                            if st.button("🗑️ Delete", key=f"del_{user['id']}", disabled=is_self):
-                                if st.session_state.get(f"confirm_delete_{user['id']}"):
-                                    response = call_api(f"/admin/users/{user['id']}", method="DELETE")
+                    # VIEW MODE
+                    else:
+                        col_act1, col_act2, col_act3, col_act4 = st.columns(4)
+                        
+                        # Prevent self-modification
+                        is_self = user['id'] == st.session_state.user['id']
+                        can_modify = user_role == 'super_admin' or (user_role == 'admin' and user.get('role') not in ['admin', 'super_admin'])
+                        
+                        with col_act1:
+                            if st.button("✏️ Edit Role", key=f"edit_{user['id']}", disabled=is_self or not can_modify, use_container_width=True):
+                                st.session_state[f"editing_{user['id']}"] = True
+                                st.rerun()
+                        
+                        with col_act2:
+                            if user.get('is_active'):
+                                if st.button("🚫 Deactivate", key=f"deact_{user['id']}", disabled=is_self or not can_modify, use_container_width=True):
+                                    response = call_api(f"/admin/users/{user['id']}", method="PUT", data={
+                                        "is_active": False
+                                    })
                                     if response:
-                                        st.success(f"User {user['username']} deleted")
+                                        st.success(f"User {user['username']} deactivated")
                                         time.sleep(1)
                                         st.rerun()
-                                else:
-                                    st.session_state[f"confirm_delete_{user['id']}"] = True
-                                    st.warning("Click again to confirm deletion")
+                            else:
+                                if st.button("✅ Activate", key=f"act_{user['id']}", disabled=not can_modify, use_container_width=True):
+                                    response = call_api(f"/admin/users/{user['id']}", method="PUT", data={
+                                        "is_active": True
+                                    })
+                                    if response:
+                                        st.success(f"User {user['username']} activated")
+                                        time.sleep(1)
+                                        st.rerun()
+                        
+                        with col_act3:
+                            if st.button("🔄 Reset Password", key=f"reset_{user['id']}", disabled=not can_modify, use_container_width=True):
+                                st.info("Password reset functionality - Send reset email")
+                        
+                        with col_act4:
+                            if user_role == 'super_admin':
+                                if st.button("🗑️ Delete", key=f"del_{user['id']}", disabled=is_self, use_container_width=True):
+                                    if st.session_state.get(f"confirm_delete_{user['id']}"):
+                                        response = call_api(f"/admin/users/{user['id']}", method="DELETE")
+                                        if response:
+                                            st.success(f"User {user['username']} deleted")
+                                            time.sleep(1)
+                                            st.rerun()
+                                    else:
+                                        st.session_state[f"confirm_delete_{user['id']}"] = True
+                                        st.warning("Click again to confirm deletion")
         else:
             st.info("No users found or unable to fetch user data")
     
@@ -900,25 +997,32 @@ elif st.session_state.page == 'Admin Dashboard':
     # TAB 2: ADD USER
     # ====================
     with tab2:
-        st.markdown("### Get Started")
-        st.caption("Create your analyst account")
-    
-        with st.form("signup_form"):
-            username = st.text_input("Username *", placeholder="johndoe")
-            new_password = st.text_input("Password *", type="password", placeholder="Min. 6 characters")
-            confirm_password = st.text_input("Confirm Password *", type="password", placeholder="Re-enter password")
+        st.markdown("### Create New User Account")
+        st.caption("Admin: Create analyst accounts for your team")
+
+        with st.form("admin_create_user_form"):
+            col_form1, col_form2 = st.columns(2)
             
-            # Info about role
-            st.info("ℹ️ **Account Type:** Fraud Analyst\n\nYou'll have access to fraud detection, monitoring, and transaction verification features.")
+            with col_form1:
+                username = st.text_input("Username *", placeholder="johndoe", key="admin_new_username")
+                email = st.text_input("Email *", placeholder="johndoe@company.com", key="admin_new_email")
+                full_name = st.text_input("Full Name *", placeholder="John Doe", key="admin_new_fullname")
             
-            # Terms and conditions
-            agree_terms = st.checkbox("I agree to the Terms of Service and Privacy Policy")
+            with col_form2:
+                new_password = st.text_input("Password *", type="password", placeholder="Min. 6 characters", key="admin_new_password")
+                confirm_password = st.text_input("Confirm Password *", type="password", key="admin_new_confirm")
+                organization = st.text_input("Organization", placeholder="Company Name", value=st.session_state.user.get('organization', ''), key="admin_new_org")
             
-            submit_signup = st.form_submit_button("Create Account", use_container_width=True, type="primary")
+            department = st.text_input("Department (Optional)", placeholder="e.g., Fraud Prevention", key="admin_new_dept")
+            phone = st.text_input("Phone (Optional)", placeholder="e.g., +1-555-0100", key="admin_new_phone")
             
-            if submit_signup:
+            st.info("ℹ️ **Default Role:** Fraud Analyst\n\nNew users will have access to fraud detection, monitoring, and transaction verification. You can promote them to Admin later.")
+            
+            submit_create = st.form_submit_button("➕ Create User", use_container_width=True, type="primary")
+            
+            if submit_create:
                 # Validation
-                if not all([username, new_password, confirm_password]):
+                if not all([username, email, full_name, new_password, confirm_password]):
                     st.error("⚠️ Please fill in all required fields (*)")
                 elif new_password != confirm_password:
                     st.error("⚠️ Passwords do not match")
@@ -926,32 +1030,36 @@ elif st.session_state.page == 'Admin Dashboard':
                     st.error("⚠️ Password must be at least 6 characters")
                 elif len(new_password) > 72:
                     st.error("⚠️ Password must be less than 72 characters")
-                elif not agree_terms:
-                    st.error("⚠️ Please agree to the Terms of Service")
+                elif '@' not in email or '.' not in email:
+                    st.error("⚠️ Please enter a valid email address")
                 else:
-                    with st.spinner("Creating your account..."):
-                        response = call_api("/auth/signup", method="POST", data={
+                    with st.spinner("Creating user account..."):
+                        response = call_api("/admin/users", method="POST", data={
                             "username": username,
-                            "password": new_password
+                            "password": new_password,
+                            "email": email,
+                            "full_name": full_name,
+                            "organization": organization or st.session_state.user.get('organization', 'N/A'),
+                            "department": department or None,
+                            "phone": phone or None,
+                            "role": "analyst"
                         })
                         
                         if response:
-                            st.session_state.authenticated = True
-                            st.session_state.token = response['access_token']
-                            st.session_state.user = response['user']
-                            st.session_state.page = 'Dashboard'
-                            
-                            st.success(f"✅ Account created successfully! Welcome, {username}!")
+                            st.success(f"✅ User account created successfully!")
+                            st.info(f"**Username:** {username}\n\n**Email:** {email}\n\n**Role:** Fraud Analyst")
                             st.balloons()
                             
                             time.sleep(2)
                             st.rerun()
+                        else:
+                            st.error("❌ Failed to create user. Username or email may already exist.")
         
         st.markdown("---")
         st.markdown("""
         <div style='text-align: center; color: #7289da; font-size: 13px;'>
-            <p>Already have an account? Switch to <strong>Sign In</strong> tab</p>
-            <p style='margin-top: 10px;'>For admin access, contact your system administrator</p>
+            <p>💡 <strong>Tip:</strong> New users can log in immediately with their credentials</p>
+            <p>🔐 You can promote analysts to Admin role in the <strong>Users</strong> tab</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -987,10 +1095,9 @@ elif st.session_state.page == 'Admin Dashboard':
             st.markdown(f"**Showing {len(filtered_logs)} of {len(logs_data)} logs**")
             
             # Display logs
-            for log in filtered_logs[:50]:  # Show first 50
+            for log in filtered_logs[:50]:  
                 action = log.get('action', 'UNKNOWN')
-                
-                # Color code by action type
+
                 if 'LOGIN' in action:
                     icon = '🔐'
                     color = '#00ff88' if 'SUCCESS' in action else '#ff4444'
@@ -1086,7 +1193,7 @@ elif st.session_state.page == 'Admin Dashboard':
         #### 🔧 Administrator
         - **Full System Access** - All permissions
         - 👥 Create, edit, and deactivate users
-        - 🎯 Assign roles (Admin or Analyst)
+        - 🎯 Promote Analysts to Admin role
         - 📊 View all analytics and reports
         - 🔍 Run fraud predictions
         - 📁 Batch processing
@@ -1121,36 +1228,31 @@ elif st.session_state.page == 'Live Monitor':
     # Initial load if empty
     if not st.session_state.live_transactions:
         with st.spinner("Syncing with fraud engine..."):
-            # Fetch real history from backend instead of generating fake ones one-by-one
+            # Fetch real history from backend 
             history_data = call_api("/live-transactions")
             
             if history_data:
-                # Convert ISO timestamp strings back to datetime objects if needed
                 st.session_state.live_transactions = history_data
             else:
-                # Fallback if empty: Generate just 2 to start, not 15
                 for _ in range(2):
                     new_txn = generate_single_transaction()
                     if new_txn:
                         st.session_state.live_transactions.append(new_txn)
                         add_transaction_to_history(new_txn)
-    
-    # Check if we need to generate new transaction (every 5 seconds)
+
     current_time = time.time()
     if auto_refresh and (current_time - st.session_state.last_refresh >= 5):
-        # Generate ONE new transaction
+        # Generate new transaction
         new_txn = generate_single_transaction()
         if new_txn:
-            # Add to live transactions at the beginning (newest first)
             st.session_state.live_transactions.insert(0, new_txn)
             # Keep only last 15 transactions
             st.session_state.live_transactions = st.session_state.live_transactions[:15]
-            # Add to global history
             add_transaction_to_history(new_txn)
         
         st.session_state.last_refresh = current_time
     
-    # Create placeholder for transactions table only
+    # Create placeholder for transactions table 
     transactions_placeholder = st.empty()
     
     # Separate placeholder for audit modal
@@ -1162,8 +1264,7 @@ elif st.session_state.page == 'Live Monitor':
         if transactions:
             with transactions_placeholder.container():
                 st.markdown("---")
-                
-                # Table header
+
                 cols = st.columns([1, 1.2, 1, 1.5, 1.2, 1, 1.2, 0.6])
                 cols[0].markdown('<p class="table-header">Time</p>', unsafe_allow_html=True)
                 cols[1].markdown('<p class="table-header">ID</p>', unsafe_allow_html=True)
@@ -1176,11 +1277,10 @@ elif st.session_state.page == 'Live Monitor':
                 
                 st.markdown("---")
                 
-                # Display transactions (already sorted, newest first)
+                # Display transactions 
                 for idx, txn in enumerate(transactions):
                     cols = st.columns([1, 1.2, 1, 1.5, 1.2, 1, 1.2, 0.6])
-                    
-                    # Highlight newest transaction (first one)
+
                     if idx == 0:
                         cols[0].markdown(f'<p class="table-text" style="color: #00ff88; font-weight: 700;">🆕 {txn["time"]}</p>', unsafe_allow_html=True)
                     else:
@@ -1220,8 +1320,7 @@ elif st.session_state.page == 'Live Monitor':
                     if cols[7].button("🔍", key=f"audit_{idx}_{txn['id']}"):
                         st.session_state.show_audit_modal = True
                         st.session_state.audit_data = txn
-    
-    # Display transactions
+
     display_live_transactions()
     
     # AI Audit Modal in separate placeholder
@@ -1311,7 +1410,7 @@ elif st.session_state.page == 'Live Monitor':
                 st.session_state.audit_data = None
                 st.rerun()
     
-    # Auto-refresh logic - only refresh if modal is not open
+    # Auto-refresh 
     if auto_refresh and not st.session_state.show_audit_modal:
         time.sleep(1)
         st.rerun()
@@ -1338,8 +1437,7 @@ elif st.session_state.page == 'Prediction Simulator':
             'category': 'Grocery Pos',
             'trans_hour': 14,
             'age': 35,
-            'city_pop': 150000,
-            'card_number': ''
+            'city_pop': 150000
         },
         'medium': {
             'name': '⚠️ Medium Risk',
@@ -1347,8 +1445,7 @@ elif st.session_state.page == 'Prediction Simulator':
             'category': 'Shopping Net',
             'trans_hour': 3,
             'age': 82,
-            'city_pop': 25000,
-            'card_number': ''
+            'city_pop': 25000
         },
         'high': {
             'name': '🚨 High Risk',
@@ -1356,8 +1453,7 @@ elif st.session_state.page == 'Prediction Simulator':
             'category': 'Misc Net',
             'trans_hour': 3,
             'age': 17,
-            'city_pop': 500,
-            'card_number': 'CARD_12345'
+            'city_pop': 500
         }
     }
     
@@ -1443,15 +1539,6 @@ elif st.session_state.page == 'Prediction Simulator':
                 step=1000
             )
             
-            st.markdown("#### Velocity Testing")
-            card_number = st.text_input(
-                "Card Number (Optional)", 
-                value=preset_data.get('card_number', ''),
-                placeholder="Enter to test velocity rules"
-            )
-            
-            st.caption("💡 Submit multiple times with same card to trigger velocity rules")
-            
             submit = st.form_submit_button("🔍 Analyze Transaction", 
                                           use_container_width=True, 
                                           type="primary")
@@ -1473,8 +1560,7 @@ elif st.session_state.page == 'Prediction Simulator':
                     "category": category,
                     "trans_hour": trans_hour,
                     "age": age,
-                    "city_pop": city_pop,
-                    "card_number": card_number if card_number else None
+                    "city_pop": city_pop
                 }
                 
                 result = predict_transaction(trans_data)
@@ -1677,10 +1763,7 @@ elif st.session_state.page == 'Prediction Simulator':
             - 📚 Simple ML explanations for non-technical users
             - 🔐 Direct second verification workflow
             - 📝 Add analyst notes for audit trail
-            
-            **Test velocity rules** by submitting multiple transactions 
-            with the same card number!
-            
+
             ---
             
             **Preset Scenarios:**
@@ -2064,7 +2147,7 @@ elif st.session_state.page == 'Transaction History':
     else:
         st.info("No transactions found matching the selected filters.")
     
-    # AI Audit Modal (same as Live Monitor)
+    # AI Audit Modal
     if st.session_state.show_audit_modal and st.session_state.audit_data:
         st.markdown("---")
         st.markdown("---")
@@ -2132,3 +2215,5 @@ elif st.session_state.page == 'Transaction History':
 
 st.markdown("---")
 st.caption(f"© 2025 FraudGuard AI - Hybrid Detection System | Connected to: {API_BASE_URL}")
+
+
