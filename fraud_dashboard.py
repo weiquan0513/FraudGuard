@@ -150,7 +150,7 @@ ROLES = {
 # CONFIGURATION
 # ============================================================================
 
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = "https://fraudguard-sjwe.onrender.com"
 
 st.set_page_config(
     page_title="FraudGuard AI",
@@ -2246,6 +2246,7 @@ elif st.session_state.page == 'Transaction History':
 
 st.markdown("---")
 st.caption(f"© 2025 FraudGuard AI - Hybrid Detection System | Connected to: {API_BASE_URL}")
+
 
 
 
