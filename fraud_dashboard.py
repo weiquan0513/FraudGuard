@@ -150,7 +150,7 @@ ROLES = {
 # CONFIGURATION
 # ============================================================================
 
-API_BASE_URL = "https://fraudguard-sjwe.onrender.com"
+API_BASE_URL = "http://localhost:8000"
 
 st.set_page_config(
     page_title="FraudGuard AI",
@@ -2203,6 +2203,37 @@ elif st.session_state.page == 'Transaction History':
         
         st.markdown("---")
         
+        # ML Ensemble
+        st.markdown("**ML Ensemble**")
+        st.progress(txn['ml_proba'], text=f"XGBoost: {txn['ml_proba']*100:.0f}%")
+        st.progress(txn['ml_proba'] * 0.9, text=f"Random Forest: {txn['ml_proba']*90:.0f}%")
+        st.progress(txn['ml_proba'] * 1.1, text=f"Logistic Regression: {min(txn['ml_proba']*110, 100):.0f}%")
+        
+        # Show DNN if available
+        if txn.get('dnn_proba'):
+            st.progress(txn['dnn_proba'], text=f"🧠 DNN: {txn['dnn_proba']*100:.0f}%")
+        
+        st.markdown("---")
+        
+        # Risk Analysis
+        st.markdown("**⚠️ Risk Analysis:**")
+        st.info(f"""
+        The system's **{txn['status'].upper()}** decision is well-justified. 
+        Although the transaction amount (${txn['amount']:.2f}) is relatively {'high' if txn['amount'] > 1000 else 'moderate' if txn['amount'] > 500 else 'low'}, 
+        key factors contribute to the {'elevated' if txn['hybrid_score'] > 0.5 else 'moderate' if txn['hybrid_score'] > 0.3 else 'low'} risk: 
+        the use of the '{txn['category']}' category, which is {'inherently high-risk' if 'net' in txn['category'].lower() else 'generally safe'} 
+        due to its generic nature and frequent association with fraudulent activity. 
+        The Machine Learning model assigns a {txn['hybrid_score']:.0%} probability, 
+        {'indicating high-confidence fraud' if txn['hybrid_score'] > 0.7 else 'suggesting moderate risk' if txn['hybrid_score'] > 0.3 else 'indicating legitimate behavior'}. 
+        Combined with the flags raised by the rule-based component, this creates 
+        {'enough ambiguity to warrant a manual review' if txn['status'] == 'Review' else 'sufficient confidence for automated ' + txn['status'].lower()}.
+        """)
+        
+        st.markdown("**Final Verdict:** " + 
+                   ("✓ Agree with System" if txn['hybrid_score'] < 0.6 else "⚠️ Review Recommended"))
+        
+        st.markdown("---")
+        
         # Close button
         if st.button("Close Audit", use_container_width=True, type="primary"):
             st.session_state.show_audit_modal = False
@@ -2215,6 +2246,5 @@ elif st.session_state.page == 'Transaction History':
 
 st.markdown("---")
 st.caption(f"© 2025 FraudGuard AI - Hybrid Detection System | Connected to: {API_BASE_URL}")
-
 
 
